@@ -3,9 +3,14 @@ import axios from "axios";
 import apiURLs from "../utility/apiURLs";
 import { useNavigate, useParams } from "react-router-dom";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import { storage } from "./FirebaseConfig";
-
-const API_URL = apiURLs.sheety;
+import { db, storage } from "./firebase";
+import {
+  collection,
+  getDocs,
+  query,
+  updateDoc,
+  where,
+} from "firebase/firestore";
 
 const PickupDetails = () => {
   const [details, setDetails] = useState(null);
@@ -14,6 +19,7 @@ const PickupDetails = () => {
   const [productImages, setProductImages] = useState([]);
   const [packageWeightImages, setPackageWeightImages] = useState([]);
   const [formImages, setFormImages] = useState([]);
+  const [PickUPPersonImages, setPickUPPersonImages] = useState([]);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [pickupWeight, setPickupWeight] = useState("");
   const [numberOfPackages, setNumberOfPackages] = useState(1);
@@ -21,18 +27,25 @@ const PickupDetails = () => {
   const navigate = useNavigate();
   useEffect(() => {
     const fetchDetails = async () => {
+      const pickupCollection = collection(db, "pickup"); // Reference the 'Pickup' collection
+      const pickupQuery = query(
+        pickupCollection,
+        where("status", "==", "RUN SHEET"),
+        where("awbNumber", "==", parseInt(awbNumber))
+      );
       try {
-        const result = await axios.get(API_URL);
-        const userDetails = result.data.sheet1.find(
-          (item) =>
-            item.status === "RUN SHEET" &&
-            item.awbNumber === parseInt(awbNumber)
-        );
-        setDetails(userDetails);
-        setPickupWeight(userDetails?.pickupWeight || "");
-        setNumberOfPackages(userDetails?.numberOfPackages || 1);
+        const snapshot = await getDocs(pickupQuery); // Execute query
+        if (!snapshot.empty) {
+          const userDetails = snapshot.docs[0].data(); // Assuming one document matches
+          setDetails(userDetails);
+          setPickupWeight(userDetails.pickupWeight || "");
+          setNumberOfPackages(userDetails.numberOfPackages || 1);
+        } else {
+          console.error("No matching document found");
+          setDetails(null);
+        }
       } catch (error) {
-        handleError(error);
+        console.error("Error fetching data:", error);
       } finally {
         setLoading(false);
       }
@@ -41,12 +54,21 @@ const PickupDetails = () => {
   }, [awbNumber]);
 
   const uploadFileToFirebase = async (file, folder) => {
-    const response = await fetch(file);
-    const blob = await response.blob();
-    const storageRef = ref(storage, `${awbNumber}/${folder}/${file.name}`);
-    await uploadBytes(storageRef, blob);
-    const url = await getDownloadURL(storageRef);
-    return url;
+    try {
+      // Create a storage reference
+      const storageRef = ref(storage, `${awbNumber}/${folder}/${file.name}`);
+
+      // Upload the file directly
+      await uploadBytes(storageRef, file);
+
+      // Get the download URL after upload
+      const url = await getDownloadURL(storageRef);
+
+      return url;
+    } catch (error) {
+      console.error("Error uploading file:", error);
+      throw error;
+    }
   };
 
   const handleFileChange = (folder, setState) => {
@@ -80,6 +102,10 @@ const PickupDetails = () => {
     }
     if (formImages.length === 0 || formImages.length > 2) {
       setError("You must upload between 1 to 2 form images.");
+      return false;
+    }
+    if (PickUPPersonImages.length === 0 || PickUPPersonImages.length > 1) {
+      setError("You Must Upload  Your Image. (Taken now)");
       return false;
     }
     setError("");
@@ -124,17 +150,31 @@ const PickupDetails = () => {
         formImages.map((file) => uploadFileToFirebase(file, "FORM IMAGES"))
       );
 
-      await axios.put(`${API_URL}/${details.id}`, {
-        sheet1: {
-          postPickupWeight: `${pickupWeight} KG`,
-          postNumberOfPackages: numberOfPackages,
-          status: "INCOMING MANIFEST",
-          pickUpPersonNameStatus: "PICKUP COMPLETED",
-          PRODUCTSIMAGE: productImageUrls.join(", "),
-          PACKAGEWEIGHTIMAGES: packageWeightImageUrls.join(", "),
-          FORMIMAGES: formImageUrls.join(", "),
-          pickupCompletedDatatime: PickupCompletedDate(),
-        },
+      const pickupPersonImage = await Promise.all(
+        formImages.map((file) =>
+          uploadFileToFirebase(file, "PICKUPPERSONIMAGE")
+        )
+      );
+
+      const pickupCollection = collection(db, "pickup");
+
+      // Query to find the document with the given awbNumber
+      const q = query(
+        pickupCollection,
+        where("awbNumber", "==", parseInt(awbNumber))
+      );
+      const querySnapshot = await getDocs(q);
+      const docRef = querySnapshot.docs[0].ref;
+      await updateDoc(docRef, {
+        postPickupWeight: `${pickupWeight} KG`,
+        postNumberOfPackages: numberOfPackages,
+        status: "INCOMING MANIFEST",
+        pickUpPersonNameStatus: "PICKUP COMPLETED",
+        PRODUCTSIMAGE: productImageUrls,
+        PACKAGEWEIGHTIMAGES: packageWeightImageUrls,
+        FORMIMAGES: formImageUrls,
+        pickupCompletedDatatime: PickupCompletedDate(),
+        PickupPersonImageURL: pickupPersonImage, // If you are storing this separately
       });
       navigate("/pickup");
       resetForm();
@@ -163,14 +203,11 @@ const PickupDetails = () => {
     setProductImages([]);
     setPackageWeightImages([]);
     setFormImages([]);
+    setPickUPPersonImages([]);
   };
 
   if (loading) {
     return <div className="text-center text-gray-500">Loading...</div>;
-  }
-
-  if (error) {
-    return <div className="text-red-500">{error}</div>;
   }
 
   return (
@@ -257,7 +294,6 @@ const PickupDetails = () => {
                 +
               </button>
             </div>
-            {error && <p className="text-red-500">{error}</p>}
           </div>
           <div className="mb-5 p-4 bg-white rounded-lg shadow-md">
             <h2 className="text-xl font-semibold">Upload Files</h2>
@@ -291,7 +327,9 @@ const PickupDetails = () => {
               ))}
             </div>
             <div className="my-3">
-              <h3 className="text-lg font-semibold">Package Weight Images ( 1 - 5 )</h3>
+              <h3 className="text-lg font-semibold">
+                Package Weight Images ( 1 - 5 )
+              </h3>
               <button
                 onClick={() =>
                   handleFileChange("PACKAGE WEIGHT", setPackageWeightImages)
@@ -340,7 +378,40 @@ const PickupDetails = () => {
                 </div>
               ))}
             </div>
+            <div className="my-3">
+              <h3 className="text-lg font-semibold">
+                Upload Your Image (Taken now)
+              </h3>
+              <button
+                onClick={() =>
+                  handleFileChange(
+                    "PICKUP PERSON IMAGES",
+                    setPickUPPersonImages
+                  )
+                }
+                className="bg-purple-500 text-white rounded px-4 py-2 mb-2 transition duration-200 hover:bg-purple-600"
+              >
+                Add Image
+              </button>
+              {PickUPPersonImages.map((file, index) => (
+                <div
+                  key={index}
+                  className="flex items-center justify-between mb-2"
+                >
+                  <span>{file.name}</span>
+                  <button
+                    onClick={() =>
+                      handleRemoveFile(file.name, setPickUPPersonImages)
+                    }
+                    className="text-red-500 hover:text-red-700"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
+          {error && <p className="text-red-500 mb-3">{error}</p>}
           <button
             onClick={onSubmit}
             disabled={submitLoading}

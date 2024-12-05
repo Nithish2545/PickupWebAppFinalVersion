@@ -1,12 +1,6 @@
 import React from "react";
 
 const PickupCompleted = ({ userData, pickupPersons }) => {
-  
-  const handleCardPress = (awbNumber) => {
-    // Handle card press action
-    console.log(`Card pressed for AWB Number: ${awbNumber}`);
-  };
-
   return (
     <div>
       {userData.length === 0 ? (
@@ -41,7 +35,9 @@ const PickupCompleted = ({ userData, pickupPersons }) => {
                 >
                   PICKUP COMPLETED
                 </p>
-                <p className="text-green-700 font-semibold text-lg">{user.pickuparea}</p>
+                <p className="text-green-700 font-semibold text-lg">
+                  {user.pickuparea}
+                </p>
               </div>
             </div>
             <div className="flex justify-between mb-2">
@@ -50,19 +46,29 @@ const PickupCompleted = ({ userData, pickupPersons }) => {
             </div>
             <div className="flex justify-between mb-2">
               <span className="font-semibold text-gray-600">Consignee:</span>
-              <span className="text-gray-800">{user.consignorname || "N/A"}</span>
+              <span className="text-gray-800">
+                {user.consignorname || "N/A"}
+              </span>
             </div>
             <div className="flex justify-between mb-2">
               <span className="font-semibold text-gray-600">Destination:</span>
               <span className="text-gray-800">{user.destination || "N/A"}</span>
             </div>
             <div className="flex justify-between mb-2">
-              <span className="font-semibold text-gray-600">Post Pickup Weight:</span>
-              <span className="text-gray-800">{user.postPickupWeight || "N/A"}</span>
+              <span className="font-semibold text-gray-600">
+                Post Pickup Weight:
+              </span>
+              <span className="text-gray-800">
+                {user.postPickupWeight || "N/A"}
+              </span>
             </div>
             <div className="flex justify-between mb-2">
-              <span className="font-semibold text-gray-600">Pickup Completed:</span>
-              <span className="text-gray-800">{user.pickupCompletedDatatime || "N/A"}</span>
+              <span className="font-semibold text-gray-600">
+                Pickup Completed:
+              </span>
+              <span className="text-gray-800">
+                {user.pickupCompletedDatatime || "N/A"}
+              </span>
             </div>
           </div>
         ))

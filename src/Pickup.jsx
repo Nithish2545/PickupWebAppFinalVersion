@@ -1,33 +1,26 @@
 import { useEffect, useState } from "react";
-import axios from "axios";
 import Runsheet from "./Runsheet";
-import apiURLs from "../utility/apiURLs";
 import PickupCompleted from "./PickupCompleted";
 import { signOut } from "firebase/auth";
-import { FIREBASE_AUTH } from "./FirebaseConfig";
+import { auth, db } from "./firebase";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faTruckPickup } from "@fortawesome/free-solid-svg-icons";
 import { faCheckCircle } from "@fortawesome/free-solid-svg-icons";
 import { useNavigate } from "react-router-dom";
+import { collection, getDocs, onSnapshot } from "firebase/firestore";
 
 export default function Admin() {
   const [loading, setLoading] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
   const [userData, setUserData] = useState([]);
   const [error, setError] = useState("");
-  const [userRole, setUserRole] = useState(null);
-  const [assignments, setAssignments] = useState({});
   const [userName, setUserName] = useState("");
-  const API_URL = apiURLs.sheetDB;
   const [currentTab, setCurrentTab] = useState("RUN SHEET");
   const navigate = useNavigate();
   const handleSignOut = () => {
-    signOut(FIREBASE_AUTH)
+    signOut(auth)
       .then(() => {
-        console.log("Sign-out successful.");
         // Clear user data from localStorage upon sign-out
         localStorage.removeItem("userData");
-        localStorage.removeItem("authToken");
         navigate("/");
       })
       .catch((error) => {
@@ -37,89 +30,74 @@ export default function Admin() {
 
   useEffect(() => {
     const fetchData = async () => {
+      const pickupCollection = collection(db, "LoginCredentials"); // Reference to the 'Pickup' collection
       try {
-        const local_S_userData = localStorage.getItem("userData");
-        if (local_S_userData) {
-          setUserName(JSON.parse(local_S_userData)[0].name);
-        console.log(JSON.parse(local_S_userData)[0].name)
-
+        const snapshot = await getDocs(pickupCollection); // Fetch
+        const result = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        })); // Map to a usable format
+        setUserName(result[0][auth.currentUser.email][0]);
+      } catch (error) {
+        if (error.message.includes("Network")) {
+          // setError("Network error. Please check your connection.");
         } else {
-          console.log("No data found for key 'userData'");
+          // setError(`Error: ${error.message}`);
         }
-      } catch (e) {
-        console.error("Failed to load data from localStorage", e);
+      } finally {
+        // setLoading(false);
       }
     };
     fetchData();
   }, []);
 
-  const fetchAssignments = async () => {
+  const fetchData = () => {
+    const pickupCollection = collection(db, "pickup"); // Reference to the 'pickup' collection
     try {
-      const result = await axios.get(API_URL);
-      const assignmentsData = result.data.sheet1.reduce((acc, item) => {
-        acc[item.awbNumber] = item.pickUpPersonName;
-        return acc;
-      }, {});
-      setAssignments(assignmentsData);
-    } catch (error) {
-      console.error("Error fetching assignments from Google Sheets:", error);
-    }
-  };
-
-  useEffect(() => {
-    const fetchUserRole = () => {
-      try {
-        const token = localStorage.getItem("authToken");
-        if (token) {
-          const user = JSON.parse(token);
-          setUserRole(user.role);
+      // Listen for real-time updates
+      const unsubscribe = onSnapshot(
+        pickupCollection,
+        (snapshot) => {
+          const data = snapshot.docs.map((doc) => ({
+            id: doc.id,
+            ...doc.data(),
+          })); // Map to a usable format
+          setUserData(data); // Set the fetched data to state
+        },
+        (error) => {
+          // Handle errors
+          if (error.message.includes("Network")) {
+            setError("Network error. Please check your connection.");
+          } else {
+            setError(`Error: ${error.message}`);
+          }
         }
-      } catch (error) {
-        console.error("Error fetching user role from localStorage:", error);
-      }
-    };
-    fetchUserRole();
-  }, []);
+      );
 
-  const fetchData = async () => {
-    setLoading(true);
-    try {
-      const result = await axios.get(API_URL);
-      setUserData(result.data.sheet1);
-      await fetchAssignments();
+      // Return the unsubscribe function to stop listening when needed
+      return unsubscribe;
     } catch (error) {
-      if (error.response) {
-        setError(
-          `Error ${error.response.status}: ${error.response.data.message || error.message}`
-        );
-      } else if (error.request) {
-        setError("Network error. Please check your connection.");
-      } else {
-        setError(`Error: ${error.message}`);
-      }
-    } finally {
+      setError(`Unexpected error: ${error.message}`);
       setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchData();
-  }, []);
-
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await fetchData();
-    setRefreshing(false);
-  };
+  }, [userName]);
 
   const currentItems = userData.filter(
-    (user) => user.status === "RUN SHEET" && user.pickUpPersonName === String( userName)
+    (user) => user.status == "RUN SHEET" && user.pickUpPersonName === userName
   );
 
   const incomingManifestItems = userData.filter(
     (user) =>
-      ["INCOMING MANIFEST", "PAYMENT PENDING", "PAYMENT DONE", "SHIPMENT CONNECTED"].includes(user.status) &&
-      user.pickUpPersonName === userName
+      [
+        "INCOMING MANIFEST",
+        "PAYMENT PENDING",
+        "PAYMENT DONE",
+        "SHIPMENT CONNECTED",
+      ].includes(user.status) && user.pickUpPersonName === userName
   );
 
   const handleTabChange = (tab) => {
@@ -130,9 +108,16 @@ export default function Admin() {
     <div className="flex flex-col h-screen">
       {/* Sign out and tab title */}
       <div className="flex justify-between items-center bg-white p-4 shadow-md">
-      <h1 className="text-lg font-semibold">
-  {["INCOMING MANIFEST", "PAYMENT PENDING", "PAYMENT DONE", "SHIPMENT CONNECTED"].includes(currentTab) ? "PICKUP COMPLETED" : currentTab}
-</h1>
+        <h1 className="text-lg font-semibold">
+          {[
+            "INCOMING MANIFEST",
+            "PAYMENT PENDING",
+            "PAYMENT DONE",
+            "SHIPMENT CONNECTED",
+          ].includes(currentTab)
+            ? "PICKUP COMPLETED"
+            : currentTab}
+        </h1>
         <button
           className="px-4 py-2 bg-purple-700 text-white font-bold rounded shadow-md hover:bg-purple-800"
           onClick={handleSignOut}
@@ -153,7 +138,9 @@ export default function Admin() {
         </button>
         <button
           className={`text-xl ${
-            currentTab === "INCOMING MANIFEST" ? "text-purple-700" : "text-gray-500"
+            currentTab === "INCOMING MANIFEST"
+              ? "text-purple-700"
+              : "text-gray-500"
           }`}
           onClick={() => handleTabChange("INCOMING MANIFEST")}
         >

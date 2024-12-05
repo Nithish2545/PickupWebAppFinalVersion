@@ -2,7 +2,6 @@ import { useNavigate } from "react-router-dom";
 
 const PickupCompleted = ({ userData, pickupPersons }) => {
   const navigate = useNavigate();
-
   const handleCardPress = (awbNumber) => {
     // Handle card press action
     navigate(`/pickupdetails/${awbNumber}`);
